@@ -1,0 +1,330 @@
+library(readxl)
+
+
+#sorting
+library(optiSel)
+Pedig<-read_excel("pedigrees.xlsx")
+preped<-prePed(Pedig, addNum = TRUE)
+write.csv(preped, "preped.csv")
+
+#load ordered pedigree
+ped<-read.csv("preped.csv")
+
+#reference population subset
+ref<-ped[ped$Reference == TRUE, ]
+
+# Group the "Born" variable into bins with breaks every 50 years
+ped$Born_group <- cut(ped$Born, breaks = seq(1630, 2020, by = 50), 
+                         labels = FALSE, include.lowest = TRUE)
+
+# Create custom labels for the x-axis
+born_labels <- seq(1630, 2020, by = 50)
+born_labels <- sprintf("%d-%d", born_labels, born_labels + 49)
+
+# Summary statistics for pedigrees #MacCluer1983
+library(optiSel)
+optisel_summary<-summary(preped, maxd=40, d=5)
+write.csv(optisel_summary, "optisel_summary.csv")
+names(optisel_summary)
+
+#at this point, combine the "preped.csv" and "optisel_summary.csv" files into "results-main.xlsx"
+
+#Number of horses by yob
+results<-read_excel("results-main.xlsx")
+
+#FS family size
+
+data<-read_excel("famsize-input.xlsx")
+
+data$Sire <- ifelse(data$Sire == "NA", NA, data$Sire)
+data$Dam <- ifelse(data$Dam == "NA", NA, data$Dam)
+
+filtered_data <- data %>%
+  filter(!is.na(Sire) & !is.na(Dam))
+
+family_sizes <- filtered_data %>%
+  group_by(Sire, Dam) %>%
+  summarise(FamilySize = n()) %>%
+  ungroup()
+
+valid_families <- family_sizes %>%
+  filter(FamilySize >= 2)
+
+# Calculate the statistics
+unique_families <- nrow(valid_families)
+avg_family_size <- mean(valid_families$FamilySize)
+max_family_size <- max(valid_families$FamilySize)
+min_family_size <- min(valid_families$FamilySize)
+
+# Print the results
+cat("Number of unique FS families:", unique_families, "\n")
+cat("Average family size:", avg_family_size, "\n")
+cat("Maximum family size:", max_family_size, "\n")
+cat("Minimum family size:", min_family_size, "\n")
+
+# Pedigree Completeness Level (PCL) - input file mus be .csv, not .xlsx
+ped<-read.csv("PCL-input.csv")
+completeness<-completeness(ped, maxd=40, by="Reference")
+write.csv(completeness, "PCL.csv")
+
+names(ped)
+
+#PCL can stay in the separate file, no need to add it to the "results-main.xlsx"
+
+#Generation Intervals - 4 paths
+library(readxl)
+data<-read_excel("results-main.xlsx")
+
+library(dplyr)
+
+complete_data <- data %>% 
+  filter(!is.na(Sire) & !is.na(Dam) & !is.na(Sire_Born) & !is.na(Dam_Born))
+
+
+sire_data <- select(data, Indiv, Born) %>% rename(Sire = Indiv, Sire_Born = Born)
+dam_data <- select(data, Indiv, Born) %>% rename(Dam = Indiv, Dam_Born = Born)
+
+
+data <- left_join(data, sire_data, by = "Sire")
+data <- left_join(data, dam_data, by = "Dam")
+
+complete_data$sire_son_GI <- ifelse(complete_data$Sex == "male", 
+                                    complete_data$Born - complete_data$Sire_Born, NA)
+complete_data$sire_daughter_GI <- ifelse(complete_data$Sex == "female", 
+                                         complete_data$Born - complete_data$Sire_Born, NA)
+complete_data$dam_son_GI <- ifelse(complete_data$Sex == "male", 
+                                   complete_data$Born - complete_data$Dam_Born, NA)
+complete_data$dam_daughter_GI <- ifelse(complete_data$Sex == "female", 
+                                        complete_data$Born - complete_data$Dam_Born, NA)
+
+
+average_GIs_list <- list(
+  sire_son = mean(complete_data$sire_son_GI, na.rm = TRUE),
+  sire_daughter = mean(complete_data$sire_daughter_GI, na.rm = TRUE),
+  dam_son = mean(complete_data$dam_son_GI, na.rm = TRUE),
+  dam_daughter = mean(complete_data$dam_daughter_GI, na.rm = TRUE)
+)
+
+print(average_GIs_list)
+
+overall_average_GI <- mean(c(sire_son_GI, GI_sire_daughter, 
+                             GI_dam_son, GI_dam_daughter))
+print(overall_average_GI)
+
+na_rows <- data %>% filter(is.na(Born) | is.na(Sire_Born) | is.na(Dam_Born))
+print(na_rows)
+
+
+#Founder Lines - output is the founder name for each individual
+#Create a new df for nadiv package that consists of 4 columns named: Indiv, Dam, Sire, Sex (must be in this order)
+library(nadiv)
+preped<-read.csv("founders-input.csv")
+preped_nadiv <- preped[, c("Indiv", "Dam", "Sire", "Sex")]
+preped_nadiv <- preped_nadiv[, c("Indiv", "Dam", "Sire", "Sex")]
+
+damlines<-founderLine(preped, sex = "Dam")
+sirelines<-founderLine(preped, sex = "Sire")
+
+write.csv(damlines, "damlines.csv")
+write.csv(sirelines, "sirelines.csv")
+
+#add "sireline" and "damline" column to "results-main.xlsx (the names are coded, to uncode them use the vlookup function"
+
+#Gene Dropping
+#for this function, nadiv requires df with ID, Dam, Sire columns
+genedrop<-read.csv("nadiv-genedrop.csv")
+genedrop_output<-geneDrop(genedrop, N = 40)
+
+num_ped_components <- sapply(genedrop_output, inherits, "numPed")
+for (i in seq_along(genedrop_output)) {
+  if (!num_ped_components[i]) {
+    data_frame <- as.data.frame(genedrop_output[[i]])
+    csv_file <- paste(names(genedrop_output)[i], ".csv", sep = "")
+    write.csv(data_frame, file = csv_file, row.names = FALSE)
+  }
+}
+
+write.csv(genedrop_output, "genedrop.csv")
+#Number of founders and ancestors
+#for this function, we need df with "id", "dam", "sire" and "reference" columns (in this order)
+names(preped)
+df <- preped[, c("numIndiv", "numSire", "numDam", "Reference")]
+head(df)
+
+names(df)[names(df) == "numIndiv"] <- "id"
+names(df)[names(df) == "numDam"] <- "dam"
+names(df)[names(df) == "numSire"] <- "sire"
+names(df)[names(df) == "Reference"] <- "reference"
+
+ped <- df[, c("id", "dam", "sire", "reference")]
+names(ped)
+head(ped)
+
+#if the function returns Error: Mandatory 'id', 'dam' and 'sire' columns need to be of type integer - read new csv file
+ped<-read.csv("ancestors-input.csv")
+
+ancestors<-pop_Nancestors(ped, reference = "reference", skip_Ng = FALSE)
+#this is a separate results sheet
+write.csv(ancestors, "ancestors.csv")
+
+#Effective population size by increase in individual inbreeding
+#For this we need a couple of variables extracted from the "results-main.xlsx" file
+ped<-read.csv("pop_Ne-input.csv")
+names(ped)
+
+## by maximum generation
+Ne_max<-pop_Ne(ped, Fcol = "Inbreeding", tcol = "maxGen")
+print(Ne_max)
+
+## by complete generation
+Ne_full<-pop_Ne(ped, Fcol = "Inbreeding", tcol = "fullGen")
+print(Ne_full)
+## by equivalent generation
+Ne_equi<-pop_Ne(ped, Fcol = "Inbreeding", tcol = "equiGen")
+print(Ne_equi)
+
+#Coancestry matrix
+library(optiSel)
+Pedig<-read.csv("results-main.csv")
+AR<-pedIBD(Pedig)
+write.csv(AR, "kinship.csv")
+
+#2. INBREEDING
+library(optiSel)
+#the mandatory columns are: "id", "dam" and "sire"
+head(ped)
+
+#Standard Inbreeding Coefficient - already calculated by optiSel summary function, but we can check if all values match. This function takes much more time
+ip_F<-ip_F(ped, name_to = "ip_F")
+write.csv(ip_F, "ip_F.csv")
+
+#Ancestral Inbreeding Coefficient
+ip_Fa<-ip_Fa(ped, name_to = "ip_Fa", Fcol = "Inbreeding")
+write.csv(ip_Fa, "ip_Fa.csv")
+
+#Partial Inbreeding Coefficient -- LOTS OF MEMORY, LINUX ONLY
+ip_Fij<-ip_Fij(ped, Fcol = "Inbreeding")
+write.csv(ip_Fij, "ip_Fij.csv")
+
+#Purged Inbreeding Coefficient (d=0.0-0.5) --> d is undetermined for now
+ped<-read.csv("ped_maternal-input.csv")
+ip_g<-ip_g(ped, d = 0.5, name_to = "ip_g", Fcol = "Inbreeding")
+write.csv(ip_g, "ip_g.csv")
+
+#Opportunity of purging -- LOTS OF MEMORY, LINUX ONLY
+ip_op<-ip_op(ped, name_Oe = "Oe", Fcol = "Inbreeding")
+write.csv(ip_op,"ip_op.csv")
+
+#Expected Inbreeding Coefficient - based on the classic Wright's formula
+exp_F <- function(Ne, t) {
+  return(1 - (1 - 1/(2*Ne))^t)
+}
+
+#effective population size was calculated using pop_Ne function earlier in this script - for the maxGen method
+Ne <- 162.98
+t <- 0:40
+
+exp_F_values <- exp_F(Ne, t)
+result_df <- data.frame(t = 0:40, exp_F_values)
+
+write.csv(result_df, file = "exp_F.csv", row.names = FALSE)
+
+#Expected Ancestral Inbreeding Coefficient based on the formula by Lopez-Cortegano et al. 2018
+exp_Fa <- function(Ne, t) {
+  return(1 - (1 - 1/(2*Ne))^((1/2) * (t-1) * t))
+}
+
+exp_Fa_values <- exp_Fa(Ne, t)
+result_df <- data.frame(t = 0:40, exp_Fa_values)
+write.csv(result_df, file = "exp_Fa.csv", row.names = FALSE)
+
+#Expected purged inbreeding coefficient
+exp_g <- function(Ne, t, d) {
+  g <- numeric(length(t))
+  g[1] <- 1/(1 + 2*d*(2*Ne-1))  # Initial value g(1) when t = 1
+  for (i in 2:length(t)) {
+    g[i] <- ((1 - 1/(2*Ne)) * g[i-1] + 1/(2*Ne)) * (1 - 2*d * exp_Fa(Ne, t[i-1]))
+  }
+  return(g)
+}
+
+d<-0.5
+exp_g_values <- exp_g(Ne, t, d)
+
+# Calculate the asymptotic value g(a)
+asymptotic_g <- (1 - 2*d) / (1 + 2*d*(2*Ne-1))
+
+result_df <- data.frame(t = t, exp_g_values)
+
+write.csv(result_df, file = "exp_g.csv", row.names = FALSE)
+asymptotic_df <- data.frame(asymptotic_g)
+write.csv(asymptotic_df, file = "asymptotic_g.csv", row.names = FALSE)
+
+#this is a good moment to add at least ip_F, exp_F, ip_Fa and exp_Fa columns to the "results-main.xlsx" file
+
+#Maternal and paternal effects in inbreeding
+ped<-read.csv("ped_maternal-input.csv")
+maternal_inbr<-ped_maternal(ped, value_from = "Inbreeding", name_to = "mat_F")
+paternal_inbr<-ped_maternal(ped, value_from = "Inbreeding", 
+                            name_to = "pat_F", use_dam = FALSE)
+write.csv(maternal_inbr, "maternal_inbr.csv")
+write.csv(paternal_inbr, "paternal_inbr.csv")
+
+# Contributions of age cohorts to the population - tells about age of parents (also needed for candes function)
+Pedig<-read.csv("optisel-Pedig.csv")
+
+agecont<-agecont(Pedig, maxAge = 20)
+write.csv(agecont, "agecont.csv")
+
+#average kinship
+phen<-read.csv("optisel-phen-input.csv")
+cont<-read.csv("agecont.csv")
+
+names(phen)
+names(cont)
+
+library(dplyr)
+
+# Choose a reference year (adjust as needed)
+reference_year <- 1633
+
+# Calculate generation numbers based on average generation interval
+phen <- phen %>%
+  mutate(Generation = ceiling((Born - reference_year) / 10.7))
+
+# Print a preview of the updated dataset
+head(phen)
+phen<-read.csv("optisel-phen-input.csv")
+candes<-candes(phen = phen)
+
+# FITNESS AND REPRODUCTION VALUE
+
+#Number of offspring (progeny)
+offspring<-w_offspring(ped, name_to = "offspring")
+write.csv(offspring, "offspring.csv")
+
+#Number of offspring - how many times a given individual appeared in pedigrees?
+ped<-read.csv("pedigree-input.csv")
+count_off<-countOff(ped)
+write.csv(count_off, "countOff.csv")
+
+#Number of grandoffspring
+grandoffspring<-w_grandoffspring(ped, name_to = "grandoffspring")
+write.csv(grandoffspring, "grandoffspring.csv")
+
+ped<-read_excel("results-main.xlsx")
+
+#Does 2gensurv depends on inbreeding?
+model<-lm(twogensurv~ip_F, data = anc)
+
+summary(model)
+plot(model)
+
+## Genetic Contributions of different ancestors - BIG FILE (ale nie działa w Linuxie)
+ped<-read.csv("optisel-Pedig.csv")
+founders<-ped$Indiv[ped$Reference == FALSE & ped$Sire == 0 & ped$Dam ==0]
+reference<-ped$Indiv[ped$Reference == TRUE]
+
+genecont<-genecont(ped, from = founders, to = reference)
+
+write.csv(genecont, "genecont.csv")
