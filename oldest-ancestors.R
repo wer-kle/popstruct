@@ -33,7 +33,7 @@ find_oldest_ancestor <- function(indiv_id, horse_data){
   return(current_horse)
 }
 
-# Identify the oldest ancestors for all horses in your dataset
+# Identify the oldest ancestors for all horses in the dataset
 oldest_ancestors_list <- lapply(horse_data$Indiv, 
                                 function(x) find_oldest_ancestor(x, horse_data))
 
