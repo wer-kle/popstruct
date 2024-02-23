@@ -1,5 +1,6 @@
+#dataset is assumed to have following columns: 'Indiv', 'Sex', 'Sire', 'Dam' and 'Born' (indicating year of birth)
 library(readxl)
-data<-read_excel("results-main.xlsx")
+data<-read_excel("path/to/dataset")
 
 library(dplyr)
 
@@ -24,7 +25,7 @@ data <- left_join(data, dam_data, by = "Dam")
 complete_data <- data %>% 
   filter(!is.na(Sire) & !is.na(Dam) & !is.na(Sire_Born) & !is.na(Dam_Born))
 
-#calculte generation intervals for complete data
+#calculate generation intervals for complete data
 complete_data$sire_son_GI <- ifelse(complete_data$Sex == "male", 
                                     complete_data$Born - complete_data$Sire_Born, NA)
 complete_data$sire_daughter_GI <- ifelse(complete_data$Sex == "female", 
